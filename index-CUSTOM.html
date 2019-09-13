@@ -1,0 +1,395 @@
+<!--
+  Author: That JavaScript 30 Guy / David T.
+
+-->
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Whack A Root!</title>
+  <link href='https://fonts.googleapis.com/css?family=Amatic+SC:400,700' rel='stylesheet' type='text/css'>
+  <link rel="stylesheet" href="style.css">
+  <!-- <script type="text/javascript" src="script.js"></script> -->
+</head>
+<body>
+  <audio id="bgm" src="sound/bgm_intro.mp3" autoplay="autoplay"></audio>
+  <p id="debug-moles" class="debug" style="font-size: 5em; color: white;"></p>
+  <h1>Whack-a-root! <span class="score">0</span></h1>
+  <h2 class="timer"></h2>
+  <button onClick="startGame()">Start!</button>
+
+  <div id="ready"></div>
+
+  <div class="game">
+    <div class="hole hole1">
+      <div class="mole"></div>
+    </div>
+    <div class="hole hole2">
+      <div class="mole"></div>
+    </div>
+    <div class="hole hole3">
+      <div class="mole"></div>
+    </div>
+    <div class="hole hole4">
+      <div class="mole"></div>
+    </div>
+    <div class="hole hole5">
+      <div class="mole"></div>
+    </div>
+    <div class="hole hole6">
+      <div class="mole"></div>
+    </div>
+  </div>
+
+<script>
+  "use strict";
+  // https://hackernoon.com/lets-get-this-this-once-and-for-all-f59d76438d34
+
+  // Hole object definition
+  function Hole(elem,index) {
+    this.id = Symbol(index);
+    this.elem = elem;
+    this.elem.dataset.index = index;
+    this.occupied = false;
+    this.time = 0; // The amount of time for the 
+    this.timeoutRef = null; // Holds a reference to the setTimeout to delete it if the mole is clicked before it is called
+    this.index = index;    
+    
+    this.mole = this.elem.firstElementChild;
+    this.mole.dataset.index = index;
+    this.mole.addEventListener("click", bonk);
+    this.moleBonked = false;
+    this.moleIsWeepy = false;
+    this.time = 0;
+    this.audio = new Audio();
+  }
+
+  Hole.prototype.prepareMole = function() {
+    this.occupied = true;
+    this.randomizeSprite();
+    this.mole.style.opacity = 1;
+    
+    if(difficulty.spareWeepy) { }
+  }
+
+  Hole.prototype.randomizeSprite = function() {
+    let molePic = Math.floor((Math.random()*3));
+
+    if(difficulty.spareWeepy) {
+      let luck = Math.random();
+      //log("Weepy Roll: "+luck);
+
+      // code for a percent chance to spawn a weepy
+      if(luck < difficulty.weepyChance) {
+        log("Weepy spawned!");
+        this.moleIsWeepy = true;
+        this.mole.style.backgroundImage = `url('image/molew.png')`;
+        return;
+      }
+      //log("Dodged!");
+    }
+
+    //this.mole.style.background = `url('image/mole${Math.floor((Math.random()*4))}.png') bottom center/100% no-repeat`;
+    this.mole.style.backgroundImage = `url('image/mole${molePic}.png')`;
+    
+  }
+
+  // Plays on transitionend to reset the mole's attrbutes and make it available for selection again
+  Hole.prototype.reset = function() {
+    log("Resetting mole "+this.index);
+    this.occupied = false;
+    this.moleBonked = false;
+    this.moleIsWeepy = false;
+
+    this.mole.style.animation = null;
+    //this.mole.style.background = "";
+    //this.mole.style.top = "100%";
+
+    
+    //clearTimeout(this.timeoutRef); //This line seems to delete active timeouts, stopping some moles from automatically unpeeping...?
+    this.timeoutRef = null;
+    //this.mole.ontransitonend = null;
+  }
+
+
+
+
+  //test
+  let timeouttracker = 0;
+  //test
+
+
+  const ready = document.getElementById("ready");
+  ready.addEventListener("animationend",function() { ready.style.display = "none";});
+  
+  const holeCollection = document.querySelectorAll('.hole');
+  const holes = [];
+  for (var i = 0; i < holeCollection.length; i++) holes[i] = new Hole(holeCollection[i],i);
+  
+  //die effect dimesions: 462 x 426
+  
+  const scoreBoard = document.querySelector('.score');
+  const timer = document.querySelector(".timer");
+
+  var gameRef = null; //Reference to the current game's Timeout
+  
+  let molesOut = 0;
+  let lastHole;
+  //let holeFree = [true,true,true,true,true,true];
+  let timeUp = false;
+  let score = 0;
+  
+  let records = {};
+  
+  let gameRunning = false;
+  
+  // Create a difficulty object for creating custom difficulty settings
+  let difficulty = {
+      maxMoles: 2, // Maximum number of moles that can be on the screen at once
+      minTime: 800, // Minimum time moles are exposed
+      maxTime: 1600, // Maximum time moles are exposed
+      minInterval: 1000, // Minimum time between moles popping up
+      maxInterval: 1500, //Maximum time between moles popping up
+      gameLength: 30000, // Duration of the game
+      spareWeepy: true, // Whether or not the 'Spare Weepy' mode is enabled
+      weepyChance: 0.15 // Chance for a Weepy to spawn, decimal from 0 to 1
+  };
+  
+  // Create a game object that holds data for a single game
+  let game = {
+    score: 0, //Score achieved
+    totalMoles: 0, // Total moles that appeared in the game
+    molesHit: 0, // Total moles the player was able to hit
+    weepysHit: 0, // Total amount of Weepys the player hit
+    rank: "F", // Letter rank (F,D,C,B,A,S)
+    
+    moleDelay: 0
+  };
+  
+  let record = {
+    score: 0, //Score achieved
+    totalMoles: 0, // Total moles that appeared in the game
+    molesHit: 0, // Total moles the player was able to hit
+    weepysHit: 0, // Total amount of Weepys the player hit
+    rank: "F" // Letter rank (F,D,C,B,A,S)
+  };
+  
+  
+  let dt = new Date();
+  
+  //const bgm = new Audio("intro.mp3");
+  const bgm = document.getElementById("bgm");
+  const sfx = new Audio();
+  const announcer = new Audio();
+  
+  
+  function startGame() {
+    if (gameRunning) return;
+
+    gameRunning = true;
+    molesOut = 0;
+    announcer.src = "sound/announcer_"+Math.floor(Math.random()*5)+".wav"
+    announcer.play();
+    bgm.src = "sound/bgm_whack1.mp3";
+    //bgm.position = 0;
+    bgm.play();
+    ready.style.display = "block";
+    ready.style.animation = "readyAnimation 0.5s linear forwards";
+    //ready.style.animation = "enemydie 0.5s linear forwards";
+
+    setTimeout(function() {
+      log("Starting a game");
+
+      scoreBoard.textContent = 0;
+      //timeUp = false;
+      score = 0;
+      
+      gameRef = setInterval(gameLoop,100);
+
+      // End the game; will change to use Date objects to determine when the game ends
+      setTimeout(() => {
+        log("Ending game")
+        clearInterval(gameRef);
+
+        //make this a real function
+        for (var i = holes.length - 1; i >= 0; i--) {
+          unpeep(i);
+        }
+
+        gameRunning = false;
+        timeUp = true;
+        bgm.src = "";
+        announcer.src = "sound/announcer_gameover.wav";
+        announcer.play()
+      }, difficulty.gameLength);
+    },500);
+  }
+
+  function gameLoop() {
+    document.getElementById("debug-moles").textContent = "molesOut:"+molesOut;
+
+
+    if (gameRunning) {
+      if(molesOut < difficulty.maxMoles) {
+        molesOut++;
+        
+        // Peep a random mole
+        let hole = randomHole();
+        
+        //hole.prepareMole();
+        peep(hole.index);
+        
+      }
+      
+    }
+  }
+
+  function endGame() {
+    // Unpeep all moles immediately
+  }
+  
+  function addScore(amt) {
+    score += amt;
+    
+    /*
+    if(amt > 0) log(`Giving ${amt} point(s)`);
+    else if(amt < 0) log("Deducting "+Math.abs(amt)+" point(s)");
+    */
+    
+    scoreBoard.textContent = score;
+  }
+  
+  
+  function randomTime(min, max) {
+    return Math.round(Math.random() * (max-min) + min);
+  }
+  
+  function randomHole(recursionDepth) {
+    const idx = Math.floor(Math.random()*holes.length);
+    const hole = holes[idx];
+    if (recursionDepth === undefined) recursionDepth = 0;
+    
+    if(hole.occupied) {
+      if(recursionDepth < 15) {
+        log("Hole "+idx+" occupied; Finding another... (recursion depth: "+recursionDepth+")");
+        return randomHole(recursionDepth+1);
+      }
+      else {
+        console.warn(`Recursion depth too high (${recursionDepth})! ABORT ABORT ABORT`);
+        return holes[idx];
+        
+      }
+    }
+    
+    //lastHole = hole;
+    return hole;
+  }
+
+  function peep(i) {
+    if(!holes[i].occupied) {
+      holes[i].prepareMole();
+      log("Peeping mole "+holes[i].index);
+      holes[i].elem.classList.add("up");
+
+      holes[i].time = randomTime(difficulty.minTime,difficulty.maxTime);
+      //console.log(holes[i].time);
+      
+      //if(holes[i].moleIsWeepy) new Audio(`sound/weepy_${Math.floor(Math.random()*3)}.wav`).play();
+      if(holes[i].moleIsWeepy) {
+        holes[i].audio.src = `sound/weepy_${Math.floor(Math.random()*3)}.wav`;
+        
+      }
+      else
+        holes[i].audio.src = `sound/peep_${Math.floor(Math.random()*3)}.wav`;
+
+
+      holes[i].audio.play();
+      
+      // Add the timeout that expires the mole
+      let t = "previous timeoutRef for "+i+": "+holes[i].timeoutRef;
+      holes[i].timeoutRef = setTimeout(function() {
+        timeouttracker++;
+        unpeep(i);
+
+      }, holes[i].time);
+      t += "\nnew timeoutRef for "+i+": "+holes[i].timeoutRef;
+      log(t,1);
+    }
+  }
+
+  function unpeep(i) {
+    log("Unpeeping mole "+holes[i].index);
+
+    molesOut--;
+    if (molesOut < 0) molesOut = 0;
+    
+
+    holes[i].audio.pause();
+
+    //if(!timeUp) peep(); //bring the next mole up
+    //this.moleBonked = false;
+    //molesOut--;
+
+    holes[i].elem.classList.remove("up");
+    //holes[i].mole.addEventListener("transitonend",function() { holes[i].reset(); });
+    //holes[i].mole.ontransitionend = holes[i].reset;
+
+    //holes[i].mole.ontransitionend = function() {alert("ohshit");}
+    holes[i].mole.addEventListener("transitionend",function() { holes[i].reset(); });
+  }
+
+  function resetMole(i) {
+    holes[i].reset();
+  }
+  
+  function bonk(e) {
+    if(!e.isTrusted) return;
+    let i = e.target.dataset.index;
+    
+    if(!holes[i].moleBonked) {
+      holes[i].moleBonked = true;
+      unpeep(i);
+
+      console.log(holes[i].mole.style.backgroundImage+"   "+holes[i].moleIsWeepy);
+      if(holes[i].moleIsWeepy) { // Clicked on a Weepy, deduct a point
+        new Audio("sound/badclick.wav").play();
+        addScore(-1);
+
+      } else {
+        new Audio(`sound/whack_${Math.floor(Math.random()*2)}.wav`).play();
+        addScore(1);
+
+      } 
+      
+      this.style.opacity = 0;
+      //this.style.animation = "enemydie 0.25s linear forwards";
+
+      console.log("Bonked "+i+" ("+((holes[0].moleIsWeepy)?"Weepy":"Mole")+")");
+      //holes[this.dataset.index].reset();
+      
+      
+    }
+
+    //scoreBoard.textContent = score;
+  }
+  
+  //moleCollection.forEach(mole => mole.addEventListener("click", bonk));
+  //setInterval(gameLoop,100);
+  
+  function timestamp() {
+    let time = new Date();
+    return time.getHours()+":"+time.getMinutes()+":"+time.getSeconds()+"."+time.getMilliseconds();
+  }
+  
+  function log(msg,lv) {
+    //console.log(timestamp()+": "+msg);
+    if(lv === undefined) lv = 0;
+
+    if(lv > 0) console.log(msg);
+  }
+  
+</script>
+</body>
+</html>
